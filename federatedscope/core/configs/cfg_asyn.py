@@ -14,6 +14,7 @@ def extend_asyn_cfg(cfg):
     cfg.asyn.timeout = 3
     cfg.asyn.min_received_num = 2
     cfg.asyn.min_received_rate = -1.0
+    cfg.asyn.stale_toleration = 10
 
     # --------------- register corresponding check function ----------
     cfg.register_cfg_check_fun(assert_asyn_cfg)
@@ -50,6 +51,9 @@ def assert_asyn_cfg(cfg):
     if not (min_received_num_valid or min_received_rate_valid):
         # (b) non-sampling case, use all clients
         cfg.asyn.min_received_num = cfg.federate.sample_client_num
+
+    # to ensure a valid stale toleration
+    assert cfg.asyn.stale_toleration >= 0 and isinstance(cfg.asyn.stale_toleration, int)
 
 
 register_config("asyn", extend_asyn_cfg)

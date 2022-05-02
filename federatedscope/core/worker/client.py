@@ -1,5 +1,6 @@
 import copy
 import logging
+import time
 
 from federatedscope.core.message import Message
 from federatedscope.core.communication import StandaloneCommManager, gRPCCommManager
@@ -168,6 +169,7 @@ class Client(Worker):
             #self.model.load_state_dict(content)
             self.state = round
             sample_size, model_para_all, results = self.trainer.train()
+            time.sleep(10)
             logger.info(
                 self._monitor.format_eval_res(results,
                                               rnd=self.state,

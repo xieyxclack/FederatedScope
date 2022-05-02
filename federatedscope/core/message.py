@@ -180,6 +180,9 @@ class Message(object):
             self.build_msg_value(self.msg_type))
         splited_msg.msg['content'].MergeFrom(self.build_msg_value(
             self.content))
+        if self.strategy is not None:
+            splited_msg.msg['strategy'].MergeFrom(self.build_msg_value(
+                self.strategy))
         return splited_msg
 
     def _parse_msg(self, value):
@@ -202,3 +205,5 @@ class Message(object):
         self.msg_type = self._parse_msg(received_msg['msg_type'])
         self.state = self._parse_msg(received_msg['state'])
         self.content = self._parse_msg(received_msg['content'])
+        if 'strategy' in received_msg:
+            self.strategy = self._parse_msg(received_msg['strategy'])

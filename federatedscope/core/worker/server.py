@@ -121,6 +121,7 @@ class Server(Worker):
 
         # Initialize communication manager and message buffer
         self.msg_buffer = {'train': dict(), 'eval': dict()}
+        self.stale_cache = dict()
         if self.mode == 'standalone':
             comm_queue = kwargs['shared_comm_queue']
             self.comm_manager = StandaloneCommManager(comm_queue=comm_queue)
@@ -187,6 +188,7 @@ class Server(Worker):
                     msg = self.comm_manager.receive()
                     move_on_flag = self.msg_handlers[msg.msg_type](msg)
                     if move_on_flag:
+                        num_failure = 0
                         time_counter.reset()
                 except TimeoutError:
                     logger.info('Time out at the training round #{}'.format(
@@ -210,7 +212,8 @@ class Server(Worker):
                             '----------- Re-starting the training round (Round #{:d}) for {:d} time -------------'
                             .format(self.state, num_failure))
                         # Clean the msg_buffer
-                        self.msg_buffer['train'][self.state].clear()
+                        if self.state in self.msg_buffer['train']:
+                            self.msg_buffer['train'][self.state].clear()
 
                         self.broadcast_model_para(
                             msg_type='model_para',
@@ -249,6 +252,18 @@ class Server(Worker):
                                 client_id]
                             msg_list.append((train_data_size,
                                              model_para_multiple[model_idx]))
+
+                    if len(self.stale_cache.keys()) > 0:
+                        print('use message buffer!!!!!!')
+                        for client_id in self.stale_cache:
+                            msg_round, content = self.stale_cache[client_id]
+                            if self.model_num == 1:
+                                msg_list.append(content)
+                            else:
+                                train_data_size, model_para_multiple = content
+                                msg_list.append((train_data_size,
+                                                model_para_multiple[model_idx]))
+                        self.stale_cache.clear()
 
                     # Trigger the monitor here (for training)
                     if 'dissim' in self._cfg.eval.monitoring:
@@ -431,7 +446,8 @@ class Server(Worker):
                     sender=self.ID,
                     receiver=receiver,
                     state=min(self.state, self.total_round_num),
-                    content=model_para))
+                    content=model_para,
+                    strategy='replaceable' if msg_type=='model_para' else None))
         if self._cfg.federate.online_aggr:
             for idx in range(self.model_num):
                 self.aggregators[idx].reset()
@@ -639,14 +655,21 @@ class Server(Worker):
 
     def callback_funcs_model_para(self, message: Message):
         round, sender, content = message.state, message.sender, message.content
-        # For a new round
-        if round not in self.msg_buffer['train'].keys():
-            self.msg_buffer['train'][round] = dict()
+        if round == self.state:
+            # For a new round
+            if round not in self.msg_buffer['train'].keys():
+                self.msg_buffer['train'][round] = dict()
 
-        self.msg_buffer['train'][round][sender] = content
+            self.msg_buffer['train'][round][sender] = content
 
-        if self._cfg.federate.online_aggr:
-            self.aggregator.inc(content)
+            if self._cfg.federate.online_aggr:
+                self.aggregator.inc(content)
+        elif hasattr(self._cfg, 'asyn') and round >= self.state-self._cfg.asyn.stale_toleration:
+            # Save the stale message into stale_cache
+            self.stale_cache[sender] = (round, content)
+        else:
+            # Drop the message that is out-of-date
+            logger.info('Drop the out-of-date message from round #{}'.format(round))
 
         return self.check_and_move_on()
 

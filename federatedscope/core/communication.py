@@ -1,5 +1,6 @@
 import grpc
 from concurrent import futures
+from collections import deque
 
 from federatedscope.core.configs.config import global_cfg
 from federatedscope.core.proto import gRPC_comm_manager_pb2, gRPC_comm_manager_pb2_grpc
@@ -60,6 +61,7 @@ class gRPCCommManager(object):
                                       port=port,
                                       options=options)
         self.neighbors = dict()
+        self.msg_queue = deque()
 
     def serve(self, max_workers, host, port, options):
         """
@@ -125,8 +127,31 @@ class gRPCCommManager(object):
                 receiver_address = self.neighbors[each_receiver]
                 self._send(receiver_address, message)
 
+    def _replace(self, new_message):
+        modified_msg_queue = self.msg_queue.copy()
+        sender, msg_type, state = new_message.sender, new_message.msg_type, new_message.state
+        for message in self.msg_queue:
+            if message.strategy == 'replaceable':
+                if message.sender == sender and message.msg_type == msg_type and message.state <= state:
+                    modified_msg_queue.remove(message)
+        self.msg_queue = modified_msg_queue
+
     def receive(self):
-        received_msg = self.server_funcs.receive()
-        message = Message()
-        message.parse(received_msg.msg)
-        return message
+        while True:
+            received_msgs = self.server_funcs.receive()
+            if received_msgs is not None:
+                for received_msg in received_msgs:
+                    message = Message()
+                    message.parse(received_msg.msg)
+                    self._replace(message)
+                    self.msg_queue.append(message)
+
+            print('-----------------------------------')
+            for mm in self.msg_queue:
+            print(message)
+            print('-----------------------------------')
+
+            if len(self.msg_queue) > 0:
+                return self.msg_queue.popleft()
+            else:
+                continue
